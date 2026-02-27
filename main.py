@@ -6,9 +6,11 @@ from fastapi import FastAPI, HTTPException, Body
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Set
 from datetime import datetime
-from external_apis import fetch_species_data, FALLBACK_DATA
+from external_apis import FALLBACK_DATA
+from species_api import search_species, get_species_details, browse_species
 
 # --- Configuration ---
+# ... (rest of configuration unchanged)
 GRID_SIZE = 50
 INITIAL_PLANTS = 150
 TICK_INTERVAL_SECONDS = 5
@@ -78,7 +80,7 @@ class WorldState:
         # Fetch initial real data or fallback
         initial_species = ["rabbit", "deer", "wolf"]
         for s in initial_species:
-            data = await fetch_species_data(s)
+            data = await get_species_details(s)
             self.species_traits[s] = data if data else FALLBACK_DATA.get(s)
 
         # Populate
@@ -104,6 +106,18 @@ class WorldState:
         traits = self.species_traits.get(species, FALLBACK_DATA.get("rabbit"))
         x, y = pos if pos else (random.randint(0, GRID_SIZE - 1), random.randint(0, GRID_SIZE - 1))
         
+        # Mapping Scientific Data to Game Stats
+        mass = traits.get("mass_kg", 10)
+        speed_raw = traits.get("speed_kmh", 20)
+        lifespan = traits.get("lifespan_years", 10)
+
+        # Scale speed: 10kmh ~ 1 tile/tick
+        speed = max(1, int(speed_raw / 10))
+        # Scale metabolism: Large animals burn more, but potentially more efficiently per kg
+        metabolic_cost = 0.5 + (math.log10(mass) if mass > 0 else 1.0)
+        # Scale lifespan: 1 year ~ 50 ticks
+        max_age = lifespan * 50
+
         animal = Animal(
             id=self.next_id,
             species=species,
@@ -112,15 +126,15 @@ class WorldState:
             x=x,
             y=y,
             age=0,
-            max_age=traits.get("max_age", 100),
+            max_age=max_age,
             health=100.0,
             hunger=100.0,
             energy=100.0,
-            speed=traits.get("speed", 1),
-            metabolic_cost=traits.get("metabolic_cost", 1.0),
-            diet_type=traits.get("diet_type", "herbivore"),
-            is_nocturnal=traits.get("is_nocturnal", False),
-            is_social=traits.get("is_social", False),
+            speed=speed,
+            metabolic_cost=metabolic_cost,
+            diet_type=traits.get("diet", "herbivore").lower(),
+            is_nocturnal=traits.get("activity_pattern", "Diurnal") == "Nocturnal",
+            is_social="Social" in traits.get("behavior", []),
             image_url=traits.get("image_url")
         )
         self.fauna.append(animal)
@@ -318,23 +332,41 @@ def get_world_state():
         "stats": world_state.get_stats()
     }
 
+@app.get("/api/species/search", tags=["Global Species"])
+async def search_species_endpoint(q: str):
+    """Search for any animal species by name."""
+    return await search_species(q)
+
+@app.get("/api/species/detail", tags=["Global Species"])
+async def get_species_detail_endpoint(name: str):
+    """Get rich behavioral and taxonomic data for a species."""
+    data = await get_species_details(name)
+    if not data:
+        raise HTTPException(status_code=404, detail="Species details not found.")
+    return data
+
+@app.get("/api/species/browse", tags=["Global Species"])
+async def browse_species_endpoint(kingdom: str = "Animalia", class_name: Optional[str] = None, offset: int = 0, limit: int = 20):
+    """Browse species by taxonomy (Kingdom, Class)."""
+    return await browse_species(kingdom, class_name, offset, limit)
+
 @app.get("/api/ecosystem/real-species", tags=["Stats"])
 def get_real_species():
     """Returns the scientific data fetched for all species in the world."""
     return world_state.species_traits
 
 @app.post("/api/god/introduce-species", tags=["God Interface"])
-async def introduce_species(species: str = Body(..., embed=True), count: int = Body(5, embed=True)):
+async def introduce_species(species_name: str = Body(..., embed=True), count: int = Body(5, embed=True)):
     """Dynamically fetch and add a new species to the world."""
-    data = await fetch_species_data(species)
+    data = await get_species_details(species_name)
     if not data:
         raise HTTPException(status_code=404, detail="Could not find realistic data for this species.")
     
-    world_state.species_traits[species] = data
+    world_state.species_traits[species_name] = data
     for _ in range(count):
-        world_state.spawn_animal(species)
+        world_state.spawn_animal(species_name)
     
-    return {"message": f"Successfully introduced {count} {species}.", "traits": data}
+    return {"message": f"Successfully introduced {count} {species_name}.", "traits": data}
 
 @app.get("/api/nanobots", tags=["Nanobots"])
 def get_nanobots():
