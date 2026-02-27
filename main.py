@@ -9,7 +9,7 @@ import os
 GRID_SIZE = 50
 INITIAL_PLANTS = 100
 TICK_INTERVAL_SECONDS = 5
-PORT = int(os.getenv("PORT", 8000))
+PORT = int(os.getenv("PORT", "8000"))
 
 # --- Data Models ---
 class Plant(BaseModel):
