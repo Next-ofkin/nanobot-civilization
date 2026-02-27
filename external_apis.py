@@ -28,13 +28,19 @@ async def fetch_species_data(species_name: str) -> Optional[Dict[str, Any]]:
     if species_name.lower() in species_cache:
         return species_cache[species_name.lower()]
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    headers = {"User-Agent": "NanoBotCivilization/1.0 (https://github.com/Next-ofkin/nanobot-civilization)"}
+
+    async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
         try:
             # 1. iNaturalist: Identify and get Scientific Name
             inat_url = f"https://api.inaturalist.org/v1/taxa?q={species_name}&rank=species"
             inat_resp = await client.get(inat_url)
+            
+            if inat_resp.status_code != 200:
+                print(f"iNaturalist error {inat_resp.status_code} for {species_name}")
+                return None
+                
             inat_data = inat_resp.json()
-
             if not inat_data.get("results"):
                 return None
 
@@ -47,11 +53,13 @@ async def fetch_species_data(species_name: str) -> Optional[Dict[str, Any]]:
             # 2. Wikipedia: Behavioral Traits
             wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{scientific_name.replace(' ', '_')}"
             wiki_resp = await client.get(wiki_url)
-            wiki_data = wiki_resp.json()
-            extract = wiki_data.get("extract", "").lower()
+            if wiki_resp.status_code == 200:
+                wiki_data = wiki_resp.json()
+                extract = wiki_data.get("extract", "").lower()
+            else:
+                extract = ""
 
             # 3. GBIF: Traits and Habitat
-            # We'll use the taxon match to get the usageKey
             gbif_match_url = f"https://api.gbif.org/v1/species/match?name={scientific_name}"
             gbif_match_resp = await client.get(gbif_match_url)
             gbif_match = gbif_match_resp.json()
@@ -61,9 +69,10 @@ async def fetch_species_data(species_name: str) -> Optional[Dict[str, Any]]:
             if usage_key:
                 gbif_profile_url = f"https://api.gbif.org/v1/species/{usage_key}/speciesProfiles"
                 gbif_profile_resp = await client.get(gbif_profile_url)
-                gbif_profiles = gbif_profile_resp.json().get("results", [])
-                if gbif_profiles:
-                    is_terrestrial = gbif_profiles[0].get("terrestrial", True)
+                if gbif_profile_resp.status_code == 200:
+                    gbif_profiles = gbif_profile_resp.json().get("results", [])
+                    if gbif_profiles:
+                        is_terrestrial = gbif_profiles[0].get("terrestrial", True)
 
             # --- Logic Extraction ---
             is_carnivore = any(word in extract for word in ["carnivore", "predator", "hunt", "prey", "eats meat"])

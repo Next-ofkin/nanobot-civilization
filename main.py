@@ -302,6 +302,11 @@ async def startup_event():
 def root():
     return {"message": "Protocol 3: Living Ecosystem Active", "world_time": world_state.tick_count, "stats": world_state.get_stats()}
 
+@app.get("/health", tags=["Health"])
+def health_check():
+    """Health check for Railway deployment."""
+    return {"status": "alive", "tick": world_state.tick_count}
+
 @app.get("/api/world/state", tags=["World"])
 def get_world_state():
     return {
