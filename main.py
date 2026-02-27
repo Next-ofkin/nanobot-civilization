@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from typing import List, Optional, Dict, Set
 from datetime import datetime
 from external_apis import FALLBACK_DATA
-from species_database import search_species, get_species_details, browse_species
+from species_database import search_gbif, get_gbif_details, browse_gbif_taxonomy
 
 # --- Configuration ---
 # ... (rest of configuration unchanged)
@@ -335,20 +335,20 @@ def get_world_state():
 @app.get("/api/species/search", tags=["Species Database"])
 async def search_species_endpoint(q: str):
     """Search for any animal species by name."""
-    return await search_species(q)
+    return await search_gbif(q)
 
 @app.get("/api/species/detail", tags=["Species Database"])
-async def get_species_detail_endpoint(scientific_name: str):
+async def get_species_detail_endpoint(name: str):
     """Get rich behavioral and taxonomic data for a species."""
-    data = await get_species_details(scientific_name)
+    data = await get_gbif_details(name)
     if not data:
         raise HTTPException(status_code=404, detail="Species details not found.")
     return data
 
 @app.get("/api/species/browse", tags=["Species Database"])
-async def browse_species_endpoint(kingdom: str = "Animalia", class_name: Optional[str] = Query(None, alias="class"), order: Optional[str] = None, family: Optional[str] = None, offset: int = 0, limit: int = 20):
-    """Browse species by taxonomy (Kingdom, Class, Order, Family)."""
-    return await browse_species(kingdom, class_name, order, family, offset, limit)
+async def browse_species_endpoint(kingdom: str = "Animalia", phylum: Optional[str] = None, class_name: Optional[str] = Query(None, alias="class"), order: Optional[str] = None, family: Optional[str] = None, offset: int = 0, limit: int = 20):
+    """Browse species by taxonomy (Kingdom, Phylum, Class, Order, Family)."""
+    return await browse_gbif_taxonomy(kingdom, phylum, class_name, order, family, offset, limit)
 
 @app.get("/api/ecosystem/real-species", tags=["Stats"])
 def get_real_species():
@@ -356,25 +356,28 @@ def get_real_species():
     return world_state.species_traits
 
 @app.post("/api/god/introduce-species", tags=["God Interface"])
-async def introduce_species(search_query: str = Body(..., embed=True), count: int = Body(5, embed=True)):
+async def introduce_species(search_query: Optional[str] = Body(None, embed=True), scientific_name: Optional[str] = Body(None, embed=True), count: int = Body(5, embed=True)):
     """Dynamically search, fetch and add a new species to the world."""
-    # First search if it's a query
-    search_results = await search_species(search_query)
-    if not search_results:
-        raise HTTPException(status_code=404, detail="Could not find any species for this query.")
+    target_name = scientific_name
     
-    # Take the first result's scientific name
-    scientific_name = search_results[0].get("scientific_name")
-    data = await get_species_details(scientific_name)
+    if search_query:
+        search_results = await search_gbif(search_query)
+        if not search_results:
+            raise HTTPException(status_code=404, detail="Could not find any species for this query.")
+        target_name = search_results[0].get("scientific_name")
     
+    if not target_name:
+        raise HTTPException(status_code=400, detail="Missing search_query or scientific_name.")
+        
+    data = await get_gbif_details(target_name)
     if not data:
         raise HTTPException(status_code=404, detail="Could not fetch realistic data for this species.")
     
-    world_state.species_traits[scientific_name] = data
+    world_state.species_traits[target_name] = data
     for _ in range(count):
-        world_state.spawn_animal(scientific_name)
+        world_state.spawn_animal(target_name)
     
-    return {"message": f"Successfully introduced {count} {scientific_name}.", "traits": data}
+    return {"message": f"Successfully introduced {count} {target_name}.", "traits": data}
 
 @app.get("/api/nanobots", tags=["Nanobots"])
 def get_nanobots():

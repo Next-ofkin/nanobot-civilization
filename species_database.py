@@ -23,7 +23,7 @@ def save_cache(cache: Dict[str, Any]):
 
 species_cache = load_cache()
 
-async def search_species(query: str) -> List[Dict[str, Any]]:
+async def search_gbif(query: str) -> List[Dict[str, Any]]:
     """
     Searches for species across GBIF and iNaturalist.
     """
@@ -55,7 +55,7 @@ async def search_species(query: str) -> List[Dict[str, Any]]:
         
         return results
 
-async def get_species_details(scientific_name: str) -> Optional[Dict[str, Any]]:
+async def get_gbif_details(scientific_name: str) -> Optional[Dict[str, Any]]:
     """
     Fetches comprehensive data from GBIF, iNaturalist, Wikipedia, and Catalogue of Life.
     """
@@ -137,7 +137,7 @@ async def get_species_details(scientific_name: str) -> Optional[Dict[str, Any]]:
             
             details = {
                 "scientific_name": scientific_name,
-                "common_names": [common_name],
+                "common_name": common_name,
                 "diet": diet,
                 "lifespan_years": 15 if "mammalia" in gbif_class else 5,
                 "mass_kg": base_mass,
@@ -164,7 +164,7 @@ async def get_species_details(scientific_name: str) -> Optional[Dict[str, Any]]:
             print(f"Error fetching details for {scientific_name}: {e}")
             return None
 
-async def browse_species(kingdom: str = "Animalia", class_name: Optional[str] = None, order: Optional[str] = None, family: Optional[str] = None, offset: int = 0, limit: int = 20) -> List[Dict[str, Any]]:
+async def browse_gbif_taxonomy(kingdom: str = "Animalia", phylum: Optional[str] = None, class_name: Optional[str] = None, order: Optional[str] = None, family: Optional[str] = None, offset: int = 0, limit: int = 20) -> List[Dict[str, Any]]:
     """
     Browses species using GBIF search for better taxonomic filtering.
     """
@@ -177,6 +177,7 @@ async def browse_species(kingdom: str = "Animalia", class_name: Optional[str] = 
         "limit": limit,
         "q": kingdom
     }
+    if phylum: params["phylum"] = phylum
     if class_name: params["class"] = class_name
     if order: params["order"] = order
     if family: params["family"] = family
