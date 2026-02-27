@@ -1,14 +1,15 @@
 import asyncio
 import random
-from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, BackgroundTasks
 from pydantic import BaseModel
 from typing import List
+import os
 
 # --- Configuration ---
 GRID_SIZE = 50
 INITIAL_PLANTS = 100
 TICK_INTERVAL_SECONDS = 5
+PORT = int(os.getenv("PORT", 8000))
 
 # --- Data Models ---
 class Plant(BaseModel):
@@ -41,15 +42,10 @@ class WorldState:
         self.next_id += 1
 
     def tick(self):
-        # Update all plants
         for plant in self.plants:
             plant.age += 1
             plant.health -= 1
-
-        # Remove dead plants (health <= 0)
         self.plants = [p for p in self.plants if p.health > 0]
-
-        # Respawn to maintain INITIAL_PLANTS
         while len(self.plants) < INITIAL_PLANTS:
             self.spawn_plant()
 
@@ -60,26 +56,22 @@ async def world_tick_loop():
     while True:
         await asyncio.sleep(TICK_INTERVAL_SECONDS)
         world_state.tick()
-        print(f"World Ticked. Current plants: {len(world_state.plants)}")
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Start the background tick loop
-    tick_task = asyncio.create_task(world_tick_loop())
-    yield
-    # Clean up
-    tick_task.cancel()
-    try:
-        await tick_task
-    except asyncio.CancelledError:
-        pass
+        print(f"Tick! Plants: {len(world_state.plants)}")
 
 # --- FastAPI App ---
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(world_tick_loop())
+
+@app.get("/")
+def root():
+    return {"message": "Nano-Bot Civilization", "port": PORT}
 
 @app.get("/health")
 def health_check():
-    return {"status": "alive"}
+    return {"status": "alive", "plants": len(world_state.plants)}
 
 @app.get("/api/world/state")
 def get_world_state():
@@ -91,4 +83,4 @@ def get_world_state():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
