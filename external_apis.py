@@ -75,7 +75,10 @@ async def fetch_species_data(species_name: str) -> Optional[Dict[str, Any]]:
                         is_terrestrial = gbif_profiles[0].get("terrestrial", True)
 
             # --- Logic Extraction ---
-            is_carnivore = any(word in extract for word in ["carnivore", "predator", "hunt", "prey", "eats meat"])
+            is_carnivore = any(word in extract for word in ["carnivore", "predator", "hunt", "eats meat", "scavenger"])
+            if "herbivore" in extract or "eats plants" in extract:
+                is_carnivore = False
+            
             is_nocturnal = "nocturnal" in extract
             is_social = any(word in extract for word in ["pack", "social", "herd", "colony", "group"])
             
