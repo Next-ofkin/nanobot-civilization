@@ -55,40 +55,40 @@ async def search_species(query: str) -> List[Dict[str, Any]]:
         
         return results
 
-async def get_species_details(name: str) -> Optional[Dict[str, Any]]:
+async def get_species_details(scientific_name: str) -> Optional[Dict[str, Any]]:
     """
     Fetches comprehensive data from GBIF, iNaturalist, Wikipedia, and Catalogue of Life.
     """
-    if name in species_cache:
-        return species_cache[name]
+    if scientific_name in species_cache:
+        return species_cache[scientific_name]
 
     headers = {"User-Agent": USER_AGENT}
     async with httpx.AsyncClient(timeout=15.0, headers=headers) as client:
         try:
             # 1. iNaturalist for image and preferred common name
-            inat_url = f"https://api.inaturalist.org/v1/taxa?q={name}&rank=species"
+            inat_url = f"https://api.inaturalist.org/v1/taxa?q={scientific_name}&rank=species"
             inat_resp = await client.get(inat_url)
             inat_data = inat_resp.json().get("results", [])
             taxon = inat_data[0] if inat_data else {}
             
-            common_name = taxon.get("preferred_common_name", name)
+            common_name = taxon.get("preferred_common_name", scientific_name)
             image_url = taxon.get("default_photo", {}).get("medium_url")
             inat_id = taxon.get("id")
 
             # 2. Wikipedia for behavior and description
-            wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{name.replace(' ', '_')}"
+            wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{scientific_name.replace(' ', '_')}"
             wiki_resp = await client.get(wiki_url)
             wiki_data = wiki_resp.json() if wiki_resp.status_code == 200 else {}
             extract = wiki_data.get("extract", "").lower()
 
             # 3. GBIF for taxonomic details and conservation
-            gbif_match_url = f"https://api.gbif.org/v1/species/match?name={name}"
+            gbif_match_url = f"https://api.gbif.org/v1/species/match?name={scientific_name}"
             gbif_resp = await client.get(gbif_match_url)
             gbif_match = gbif_resp.json()
             gbif_id = gbif_match.get("usageKey")
 
             # 4. Catalogue of Life (Checklist Bank) for Hierarchy
-            col_url = f"https://api.checklistbank.org/dataset/2340/taxon/match?name={name}"
+            col_url = f"https://api.checklistbank.org/dataset/2340/taxon/match?name={scientific_name}"
             col_resp = await client.get(col_url)
             col_data = col_resp.json() if col_resp.status_code == 200 else {}
             
@@ -97,7 +97,14 @@ async def get_species_details(name: str) -> Optional[Dict[str, Any]]:
             gbif_order = str(gbif_match.get("order", "")).lower()
             
             # --- Better Behavioral Extraction ---
-            # 1. Diet Detection
+            is_social = any(word in extract for word in ["social", "gregarious", "pack", "herd", "colony", "group", "pride", "troop"])
+            if "solitary" in extract: is_social = False
+            
+            is_territorial = any(word in extract for word in ["territorial", "defends territory", "home range"])
+            is_nocturnal = any(word in extract for word in ["nocturnal", "active at night"])
+            if "diurnal" in extract: is_nocturnal = False
+            
+            # Diet Detection
             is_carnivore = any(word in extract for word in ["carnivore", "predator", "hunts", "eats meat", "scavenger", "piscivore", "apex predator"])
             is_herbivore = any(word in extract for word in ["herbivore", "eats plants", "frugivore", "folivore", "grazing", "browser"])
             
@@ -109,29 +116,17 @@ async def get_species_details(name: str) -> Optional[Dict[str, Any]]:
                 is_herbivore = True
                 is_carnivore = False
             
-            # Final Diet Resolution
             diet = "Carnivore"
-            if is_herbivore and not is_carnivore:
-                diet = "Herbivore"
-            elif is_carnivore and is_herbivore:
-                diet = "Omnivore"
-            elif is_herbivore:
-                diet = "Herbivore"
+            if is_herbivore and not is_carnivore: diet = "Herbivore"
+            elif is_carnivore and is_herbivore: diet = "Omnivore"
+            elif is_herbivore: diet = "Herbivore"
 
-            # 2. Sociality & Territoriality
-            is_social = any(word in extract for word in ["social", "gregarious", "pack", "herd", "colony", "group", "pride", "troop"])
-            if "solitary" in extract: is_social = False
-            
-            is_territorial = any(word in extract for word in ["territorial", "defends territory", "home range"])
-            is_nocturnal = any(word in extract for word in ["nocturnal", "active at night"])
-            if "diurnal" in extract: is_nocturnal = False
-            
             # Attempt to find prey/predators in extract
             potential_prey = ["zebra", "buffalo", "wildebeest", "rabbit", "deer", "mouse", "fish", "insect"]
             prey_found = [p.capitalize() for p in potential_prey if p in extract]
             if diet == "Herbivore": prey_found = ["Plants"]
             
-            # 3. Mass & Lifespan Scaling based on Taxonomy
+            # Mass & Lifespan Scaling based on Taxonomy
             base_mass = 50.0
             if "mammalia" in gbif_class:
                 base_mass = 100.0
@@ -141,8 +136,8 @@ async def get_species_details(name: str) -> Optional[Dict[str, Any]]:
                 base_mass = 2.0
             
             details = {
-                "scientific_name": name,
-                "common_name": common_name,
+                "scientific_name": scientific_name,
+                "common_names": [common_name],
                 "diet": diet,
                 "lifespan_years": 15 if "mammalia" in gbif_class else 5,
                 "mass_kg": base_mass,
@@ -151,7 +146,7 @@ async def get_species_details(name: str) -> Optional[Dict[str, Any]]:
                 "behavior": [b for b, v in {"Social": is_social, "Nocturnal": is_nocturnal, "Territorial": is_territorial}.items() if v],
                 "social_structure": "Pack/Pride" if is_social else "Solitary",
                 "predators": ["Humans"],
-                "prey": prey_found if is_carnivore else ["Plants"],
+                "prey": prey_found,
                 "activity_pattern": "Nocturnal" if is_nocturnal else "Diurnal",
                 "conservation_status": "Unknown",
                 "description": wiki_data.get("extract", "No description available."),
@@ -161,15 +156,15 @@ async def get_species_details(name: str) -> Optional[Dict[str, Any]]:
                 "col_id": col_data.get("usageKey")
             }
 
-            species_cache[name] = details
+            species_cache[scientific_name] = details
             save_cache(species_cache)
             return details
 
         except Exception as e:
-            print(f"Error fetching details for {name}: {e}")
+            print(f"Error fetching details for {scientific_name}: {e}")
             return None
 
-async def browse_species(kingdom: str = "Animalia", class_name: Optional[str] = None, offset: int = 0, limit: int = 20) -> List[Dict[str, Any]]:
+async def browse_species(kingdom: str = "Animalia", class_name: Optional[str] = None, order: Optional[str] = None, family: Optional[str] = None, offset: int = 0, limit: int = 20) -> List[Dict[str, Any]]:
     """
     Browses species using GBIF search for better taxonomic filtering.
     """
@@ -182,8 +177,9 @@ async def browse_species(kingdom: str = "Animalia", class_name: Optional[str] = 
         "limit": limit,
         "q": kingdom
     }
-    if class_name:
-        params["class"] = class_name
+    if class_name: params["class"] = class_name
+    if order: params["order"] = order
+    if family: params["family"] = family
 
     async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
         try:

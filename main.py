@@ -2,12 +2,12 @@ import asyncio
 import random
 import os
 import math
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Query
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Set
 from datetime import datetime
 from external_apis import FALLBACK_DATA
-from species_api import search_species, get_species_details, browse_species
+from species_database import search_species, get_species_details, browse_species
 
 # --- Configuration ---
 # ... (rest of configuration unchanged)
@@ -303,9 +303,9 @@ async def world_tick_loop():
 
 # --- FastAPI App ---
 app = FastAPI(
-    title="Nano-Bot Civilization - Week 3",
-    description="🛸 Realistic Living Ecosystem with AI Nanobot Observers.",
-    version="3.0.0"
+    title="Nano-Bot Civilization - Week 4: Universal Species Database",
+    description="🛸 Complete species search system fetching ANY animal on Earth from global biodiversity databases.",
+    version="4.0.1"
 )
 
 @app.on_event("startup")
@@ -332,23 +332,23 @@ def get_world_state():
         "stats": world_state.get_stats()
     }
 
-@app.get("/api/species/search", tags=["Global Species"])
+@app.get("/api/species/search", tags=["Species Database"])
 async def search_species_endpoint(q: str):
     """Search for any animal species by name."""
     return await search_species(q)
 
-@app.get("/api/species/detail", tags=["Global Species"])
-async def get_species_detail_endpoint(name: str):
+@app.get("/api/species/detail", tags=["Species Database"])
+async def get_species_detail_endpoint(scientific_name: str):
     """Get rich behavioral and taxonomic data for a species."""
-    data = await get_species_details(name)
+    data = await get_species_details(scientific_name)
     if not data:
         raise HTTPException(status_code=404, detail="Species details not found.")
     return data
 
-@app.get("/api/species/browse", tags=["Global Species"])
-async def browse_species_endpoint(kingdom: str = "Animalia", class_name: Optional[str] = None, offset: int = 0, limit: int = 20):
-    """Browse species by taxonomy (Kingdom, Class)."""
-    return await browse_species(kingdom, class_name, offset, limit)
+@app.get("/api/species/browse", tags=["Species Database"])
+async def browse_species_endpoint(kingdom: str = "Animalia", class_name: Optional[str] = Query(None, alias="class"), order: Optional[str] = None, family: Optional[str] = None, offset: int = 0, limit: int = 20):
+    """Browse species by taxonomy (Kingdom, Class, Order, Family)."""
+    return await browse_species(kingdom, class_name, order, family, offset, limit)
 
 @app.get("/api/ecosystem/real-species", tags=["Stats"])
 def get_real_species():
@@ -356,17 +356,25 @@ def get_real_species():
     return world_state.species_traits
 
 @app.post("/api/god/introduce-species", tags=["God Interface"])
-async def introduce_species(species_name: str = Body(..., embed=True), count: int = Body(5, embed=True)):
-    """Dynamically fetch and add a new species to the world."""
-    data = await get_species_details(species_name)
+async def introduce_species(search_query: str = Body(..., embed=True), count: int = Body(5, embed=True)):
+    """Dynamically search, fetch and add a new species to the world."""
+    # First search if it's a query
+    search_results = await search_species(search_query)
+    if not search_results:
+        raise HTTPException(status_code=404, detail="Could not find any species for this query.")
+    
+    # Take the first result's scientific name
+    scientific_name = search_results[0].get("scientific_name")
+    data = await get_species_details(scientific_name)
+    
     if not data:
-        raise HTTPException(status_code=404, detail="Could not find realistic data for this species.")
+        raise HTTPException(status_code=404, detail="Could not fetch realistic data for this species.")
     
-    world_state.species_traits[species_name] = data
+    world_state.species_traits[scientific_name] = data
     for _ in range(count):
-        world_state.spawn_animal(species_name)
+        world_state.spawn_animal(scientific_name)
     
-    return {"message": f"Successfully introduced {count} {species_name}.", "traits": data}
+    return {"message": f"Successfully introduced {count} {scientific_name}.", "traits": data}
 
 @app.get("/api/nanobots", tags=["Nanobots"])
 def get_nanobots():
