@@ -92,7 +92,33 @@ async def get_species_details(name: str) -> Optional[Dict[str, Any]]:
             col_resp = await client.get(col_url)
             col_data = col_resp.json() if col_resp.status_code == 200 else {}
             
+            # --- Taxonomy-Based Fallbacks ---
+            gbif_class = str(gbif_match.get("class", "")).lower()
+            gbif_order = str(gbif_match.get("order", "")).lower()
+            
             # --- Better Behavioral Extraction ---
+            # 1. Diet Detection
+            is_carnivore = any(word in extract for word in ["carnivore", "predator", "hunts", "eats meat", "scavenger", "piscivore", "apex predator"])
+            is_herbivore = any(word in extract for word in ["herbivore", "eats plants", "frugivore", "folivore", "grazing", "browser"])
+            
+            # Taxonomic Enforcement
+            if "carnivora" in gbif_order or "cetacea" in gbif_order:
+                is_carnivore = True
+                is_herbivore = False
+            elif any(w in gbif_order for w in ["artiodactyla", "perissodactyla", "proboscidea", "rodentia"]):
+                is_herbivore = True
+                is_carnivore = False
+            
+            # Final Diet Resolution
+            diet = "Carnivore"
+            if is_herbivore and not is_carnivore:
+                diet = "Herbivore"
+            elif is_carnivore and is_herbivore:
+                diet = "Omnivore"
+            elif is_herbivore:
+                diet = "Herbivore"
+
+            # 2. Sociality & Territoriality
             is_social = any(word in extract for word in ["social", "gregarious", "pack", "herd", "colony", "group", "pride", "troop"])
             if "solitary" in extract: is_social = False
             
@@ -100,22 +126,27 @@ async def get_species_details(name: str) -> Optional[Dict[str, Any]]:
             is_nocturnal = any(word in extract for word in ["nocturnal", "active at night"])
             if "diurnal" in extract: is_nocturnal = False
             
-            # Diet Refinement
-            is_carnivore = any(word in extract for word in ["carnivore", "predator", "hunt", "eats meat", "scavenger", "piscivore"])
-            if any(word in extract for word in ["herbivore", "eats plants", "frugivore", "folivore"]):
-                is_carnivore = False
-            
             # Attempt to find prey/predators in extract
             potential_prey = ["zebra", "buffalo", "wildebeest", "rabbit", "deer", "mouse", "fish", "insect"]
             prey_found = [p.capitalize() for p in potential_prey if p in extract]
+            if diet == "Herbivore": prey_found = ["Plants"]
+            
+            # 3. Mass & Lifespan Scaling based on Taxonomy
+            base_mass = 50.0
+            if "mammalia" in gbif_class:
+                base_mass = 100.0
+                if any(w in gbif_order for w in ["proboscidea", "cetacea"]): base_mass = 3000.0
+                elif any(w in gbif_order for w in ["carnivora", "artiodactyla"]): base_mass = 200.0
+            elif "aves" in gbif_class:
+                base_mass = 2.0
             
             details = {
                 "scientific_name": name,
                 "common_name": common_name,
-                "diet": "Carnivore" if is_carnivore else "Herbivore",
-                "lifespan_years": FALLBACK_DATA[name].get("max_age", 100) // 50 if name in FALLBACK_DATA else 15,
-                "mass_kg": 100 if is_carnivore else 50, # Dynamic mass logic could be improved
-                "speed_kmh": 60 if is_carnivore else 40,
+                "diet": diet,
+                "lifespan_years": 15 if "mammalia" in gbif_class else 5,
+                "mass_kg": base_mass,
+                "speed_kmh": 60 if diet == "Carnivore" else 40,
                 "habitat": ["Savanna", "Grassland"] if any(w in extract for w in ["savanna", "grassland", "plains"]) else ["Terrestrial"],
                 "behavior": [b for b, v in {"Social": is_social, "Nocturnal": is_nocturnal, "Territorial": is_territorial}.items() if v],
                 "social_structure": "Pack/Pride" if is_social else "Solitary",
