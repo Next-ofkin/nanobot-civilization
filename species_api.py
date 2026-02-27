@@ -3,6 +3,7 @@ import json
 import os
 import asyncio
 from typing import List, Dict, Any, Optional
+from external_apis import FALLBACK_DATA
 
 CACHE_FILE = "species_cache.json"
 USER_AGENT = "NanoBotCivilization/1.0 (https://github.com/Next-ofkin/nanobot-civilization)"
@@ -139,20 +140,20 @@ async def get_species_details(name: str) -> Optional[Dict[str, Any]]:
 
 async def browse_species(kingdom: str = "Animalia", class_name: Optional[str] = None, offset: int = 0, limit: int = 20) -> List[Dict[str, Any]]:
     """
-    Browses species using GBIF taxonomy.
+    Browses species using GBIF search for better taxonomic filtering.
     """
     headers = {"User-Agent": USER_AGENT}
+    url = "https://api.gbif.org/v1/species/search"
     params = {
-        "kingdom": kingdom,
         "rank": "SPECIES",
         "status": "ACCEPTED",
         "offset": offset,
-        "limit": limit
+        "limit": limit,
+        "q": kingdom
     }
     if class_name:
         params["class"] = class_name
 
-    url = "https://api.gbif.org/v1/species"
     async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
         try:
             resp = await client.get(url, params=params)
